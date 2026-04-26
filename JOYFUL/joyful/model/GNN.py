@@ -30,9 +30,14 @@ def random_feature_mask(input_feature, drop_percent, device=torch.device('cuda:0
 
 def random_edge_pert(edge_index, num_nodes, pert_percent, device=torch.device('cuda:0')):
     num_edges = edge_index.shape[1]
-    pert_num_edges = int(num_edges*pert_percent)
-    pert_idxs = np.random.choice(num_edges, pert_num_edges, replace=False)
-    edge_index[1, pert_idxs] = torch.LongTensor(np.random.randint(0, num_nodes, pert_num_edges)).to(device)
+    pert_num_edges = int(num_edges * pert_percent)
+    if pert_num_edges <= 0:
+        return edge_index
+    pert_idxs = torch.randperm(num_edges, device=edge_index.device)[:pert_num_edges]
+    edge_index = edge_index.clone()
+    edge_index[1, pert_idxs] = torch.randint(
+        low=0, high=num_nodes, size=(pert_num_edges,), device=device, dtype=torch.long
+    )
     return edge_index
 
 class GNN(nn.Module):
