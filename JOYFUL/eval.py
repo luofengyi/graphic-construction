@@ -1,5 +1,6 @@
 import pickle
 import argparse
+import os
 import torch
 from sklearn import metrics
 from tqdm import tqdm
@@ -13,11 +14,40 @@ def load_pkl(file):
         return pickle.load(f)
 
 
+def resolve_data_path(args):
+    if args.emotion:
+        return os.path.join(
+            args.data_dir_path,
+            args.dataset,
+            "data_" + args.dataset + "_" + args.emotion + ".pkl",
+        )
+    return os.path.join(args.data_dir_path, args.dataset, "data_" + args.dataset + ".pkl")
+
+
+def resolve_checkpoint_path(args):
+    if args.checkpoint:
+        return args.checkpoint
+    if args.dataset == "mosei":
+        if args.emotion is None:
+            raise ValueError("For mosei, please provide --emotion or --checkpoint.")
+        return os.path.join(
+            "./model_checkpoints",
+            "mosei_best_dev_f1_model_" + args.modalities + "_" + args.emotion + ".pt",
+        )
+    return os.path.join(
+        "./model_checkpoints",
+        args.dataset + "_best_dev_f1_model_" + args.modalities + ".pt",
+    )
+
+
 def main(args):
-    data = load_pkl(f"./data/iemocap_4/data_iemocap_4.pkl")
-    #data = load_pkl(f"./data/iemocap/data_iemocap.pkl")
-    model_dict = torch.load('./model_checkpoints/iemocap_4_best_dev_f1_model_atv.pt')
-    #model_dict = torch.load('model_checkpoints/iemocap_best_dev_f1_model_atv.pt')
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
+        log.warning("CUDA is unavailable, fallback to CPU.")
+        args.device = "cpu"
+    data_path = resolve_data_path(args)
+    ckpt_path = resolve_checkpoint_path(args)
+    data = load_pkl(data_path)
+    model_dict = torch.load(ckpt_path)
     stored_args = model_dict["args"]
     model = model_dict["modelN_state_dict"]
     modelF = model_dict["modelF_state_dict"]
@@ -83,6 +113,12 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "--data_dir_path", type=str, help="Dataset directory path", default="./data"
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Checkpoint path. If omitted, resolve from dataset/modalities/emotion.",
     )
 
     parser.add_argument("--device", type=str, default="cuda:0", help="Computing device.")

@@ -1,0 +1,7 @@
+JOYFUL/data/
+JOYFUL/model_checkpoints/*.pt
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+JOYFUL/smoke_train.log

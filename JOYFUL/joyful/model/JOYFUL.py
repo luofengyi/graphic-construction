@@ -4,7 +4,7 @@ import torch.nn as nn
 from .SeqContext import SeqContext
 from .GNN import GNN
 from .Classifier import Classifier
-from .functions import batch_graphify
+from .functions import batch_graphify, batch_hybrid_graphify
 import joyful
 
 log = joyful.utils.get_logger()
@@ -13,6 +13,7 @@ log = joyful.utils.get_logger()
 class JOYFUL(nn.Module):
     def __init__(self, args):
         super(JOYFUL, self).__init__()
+        self.args = args
         u_dim = 100
         if args.rnn == "transformer":
             g_dim = args.hidden_size
@@ -54,8 +55,19 @@ class JOYFUL(nn.Module):
         self.wp = args.wp
         self.wf = args.wf
         self.device = args.device
+        self.graph_mode = getattr(args, "graph_mode", "binary")
 
         self.rnn = SeqContext(u_dim, g_dim, args)
+        edge_type_to_idx = {}
+        for j in range(args.n_speakers):
+            for k in range(args.n_speakers):
+                edge_type_to_idx[str(j) + str(k) + "0"] = len(edge_type_to_idx)
+                edge_type_to_idx[str(j) + str(k) + "1"] = len(edge_type_to_idx)
+        if self.graph_mode == "hybrid_expand":
+            edge_type_to_idx["HYPER"] = len(edge_type_to_idx)
+        self.edge_type_to_idx = edge_type_to_idx
+        args.num_relations = len(edge_type_to_idx)
+        log.debug(self.edge_type_to_idx)
         self.gcl = GNN(g_dim, h1_dim, h2_dim, args)
         if args.concat_gin_gout:
             self.clf = Classifier(
@@ -64,27 +76,31 @@ class JOYFUL(nn.Module):
         else:
             self.clf = Classifier(h2_dim * args.gnn_nheads, hc_dim, tag_size, args)
 
-        edge_type_to_idx = {}
-        for j in range(args.n_speakers):
-            for k in range(args.n_speakers):
-                edge_type_to_idx[str(j) + str(k) + "0"] = len(edge_type_to_idx)
-                edge_type_to_idx[str(j) + str(k) + "1"] = len(edge_type_to_idx)
-        self.edge_type_to_idx = edge_type_to_idx
-        log.debug(self.edge_type_to_idx)
-
     def get_rep(self, data=None, whetherT=None):
         node_features = self.rnn(data["text_len_tensor"], data["input_tensor"])
 
 
-        features, edge_index, edge_type, edge_index_lengths = batch_graphify(
-            node_features,
-            data["text_len_tensor"],
-            data["speaker_tensor"],
-            self.wp,
-            self.wf,
-            self.edge_type_to_idx,
-            self.device,
-        )
+        if self.graph_mode == "hybrid_expand":
+            features, edge_index, edge_type, edge_index_lengths = batch_hybrid_graphify(
+                node_features,
+                data["text_len_tensor"],
+                data["speaker_tensor"],
+                self.wp,
+                self.wf,
+                self.edge_type_to_idx,
+                self.device,
+                self.args,
+            )
+        else:
+            features, edge_index, edge_type, edge_index_lengths = batch_graphify(
+                node_features,
+                data["text_len_tensor"],
+                data["speaker_tensor"],
+                self.wp,
+                self.wf,
+                self.edge_type_to_idx,
+                self.device,
+            )
 
         graph_out, cl_loss = self.gcl(features, edge_index, edge_type, whetherT)
         return graph_out, features, cl_loss

@@ -48,6 +48,9 @@ def func(experiment, trainset, devset, testset, model, opt, sched, args):
 
 
 def main(args):
+    if args.device.startswith("cuda") and not torch.cuda.is_available():
+        log.warning("CUDA is unavailable, fallback to CPU.")
+        args.device = "cpu"
     joyful.utils.set_seed(args.seed)
 
     if args.emotion:
@@ -245,6 +248,56 @@ if __name__ == "__main__":
     parser.add_argument("--gnn_nheads", type=int, default=4)
     parser.add_argument("--num_bases", type=int, default=7)
     parser.add_argument("--use_highway", action="store_true", default=False)
+    parser.add_argument(
+        "--graph_mode",
+        type=str,
+        default="binary",
+        choices=["binary", "hybrid_expand"],
+        help="Graph construction mode.",
+    )
+    parser.add_argument(
+        "--sim_metric",
+        type=str,
+        default="cosine",
+        choices=["cosine", "dot"],
+        help="Similarity metric for hyperedge generation.",
+    )
+    parser.add_argument(
+        "--sim_threshold",
+        type=float,
+        default=0.7,
+        help="Similarity threshold for hyperedge generation.",
+    )
+    parser.add_argument(
+        "--sim_topk",
+        type=int,
+        default=-1,
+        help="Use top-k neighbors to form hyperedges, -1 to disable.",
+    )
+    parser.add_argument(
+        "--hyper_min_size",
+        type=int,
+        default=3,
+        help="Minimum hyperedge size.",
+    )
+    parser.add_argument(
+        "--hyper_max_size",
+        type=int,
+        default=8,
+        help="Maximum hyperedge size.",
+    )
+    parser.add_argument(
+        "--max_hyperedges_per_dialog",
+        type=int,
+        default=30,
+        help="Maximum generated hyperedges per dialogue.",
+    )
+    parser.add_argument(
+        "--hyper_edge_ratio_cap",
+        type=float,
+        default=1.0,
+        help="Maximum ratio of added expanded hyperedges over binary edges.",
+    )
 
     # others
     parser.add_argument("--seed", type=int, default=24, help="Random seed.")

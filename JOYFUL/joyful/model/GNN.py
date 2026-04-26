@@ -11,8 +11,10 @@ torch.cuda.manual_seed(24)
 def sim(h1, h2):
     z1 = nn.functional.normalize(h1, dim=-1, p=2)
     z2 = nn.functional.normalize(h2, dim=-1, p=2)
-
-    contrast_model = DualBranchContrast(loss=L.InfoNCE(tau=0.2), mode='L2L', intraview_negs=True).to('cuda:0')
+    device = z1.device
+    contrast_model = DualBranchContrast(
+        loss=L.InfoNCE(tau=0.2), mode='L2L', intraview_negs=True
+    ).to(device)
     loss = contrast_model(z1,z2)
     return loss
 
@@ -36,7 +38,7 @@ def random_edge_pert(edge_index, num_nodes, pert_percent, device=torch.device('c
 class GNN(nn.Module):
     def __init__(self, g_dim, h1_dim, h2_dim, args):
         super(GNN, self).__init__()
-        self.num_relations = 2 * args.n_speakers ** 2
+        self.num_relations = getattr(args, "num_relations", 2 * args.n_speakers ** 2)
 
         self.conv1 = RGCNConv(g_dim, h1_dim, self.num_relations)
 
@@ -53,11 +55,12 @@ class GNN(nn.Module):
             pert_percent2 = 0.1
 
             num_nodes = node_features.shape[0]
-            aug1_embedding = random_feature_mask(node_features, drop_percent1, device=torch.device('cuda:0'))
-            aug1_edge_index = random_edge_pert(edge_index, num_nodes, pert_percent1, device=torch.device('cuda:0'))
+            cur_device = node_features.device
+            aug1_embedding = random_feature_mask(node_features, drop_percent1, device=cur_device)
+            aug1_edge_index = random_edge_pert(edge_index, num_nodes, pert_percent1, device=cur_device)
 
-            aug2_embedding = random_feature_mask(node_features, drop_percent2, device=torch.device('cuda:0'))
-            aug2_edge_index = random_edge_pert(edge_index, num_nodes, pert_percent2, device=torch.device('cuda:0'))
+            aug2_embedding = random_feature_mask(node_features, drop_percent2, device=cur_device)
+            aug2_edge_index = random_edge_pert(edge_index, num_nodes, pert_percent2, device=cur_device)
 
             h1 = self.conv1(aug1_embedding, aug1_edge_index, edge_type)
             h2 = self.conv1(aug2_embedding, aug2_edge_index, edge_type)
