@@ -2,6 +2,7 @@ from joyful.fusion_methods import AutoFusion
 import argparse
 import torch
 import os
+import copy
 import joyful
 import warnings
 import pickle
@@ -103,7 +104,37 @@ def main(args):
 
     # Train
     log.info("Start training...")
-    coach.train()
+    best_dev_f1, best_epoch, _, _, _, _ = coach.train()
+    return {"best_dev_f1": best_dev_f1, "best_epoch": best_epoch}
+
+
+def run_with_overrides(args, run_name, epochs_override=None, seed_override=None):
+    run_args = copy.deepcopy(args)
+    if epochs_override is not None:
+        run_args.epochs = epochs_override
+    if seed_override is not None:
+        run_args.seed = seed_override
+    run_args.run_name = run_name
+    log.info(
+        "[Run config] [name {}] [seed {}] [epochs {}] [dataset {}] [modalities {}] [graph_mode {}]".format(
+            run_args.run_name,
+            run_args.seed,
+            run_args.epochs,
+            run_args.dataset,
+            run_args.modalities,
+            run_args.graph_mode,
+        )
+    )
+    result = main(run_args)
+    log.info(
+        "[Run done] [name {}] [seed {}] [best_epoch {}] [best_dev_f1 {:.4f}]".format(
+            run_args.run_name,
+            run_args.seed,
+            result["best_epoch"],
+            result["best_dev_f1"],
+        )
+    )
+    return result
 
 
 if __name__ == "__main__":
@@ -304,6 +335,24 @@ if __name__ == "__main__":
     parser.add_argument("--use_pe_in_seqcontext", action="store_true", default=False)
     parser.add_argument("--tuning", action="store_true", default=False)
     parser.add_argument("--tag", type=str, default="hyperparameters_opt")
+    parser.add_argument(
+        "--run_smoke_and_baseline",
+        action="store_true",
+        default=False,
+        help="Run a smoke test first, then a full baseline run.",
+    )
+    parser.add_argument(
+        "--smoke_epochs",
+        type=int,
+        default=1,
+        help="Epochs used in smoke test when run_smoke_and_baseline is enabled.",
+    )
+    parser.add_argument(
+        "--baseline_seed",
+        type=int,
+        default=24,
+        help="Seed used in baseline run when run_smoke_and_baseline is enabled.",
+    )
 
     args = parser.parse_args()
 
@@ -345,4 +394,23 @@ if __name__ == "__main__":
             "atv": 768,
         },
     }
-    main(args)
+    if args.run_smoke_and_baseline:
+        run_with_overrides(
+            args,
+            run_name="smoke",
+            epochs_override=args.smoke_epochs,
+            seed_override=args.seed,
+        )
+        run_with_overrides(
+            args,
+            run_name="baseline",
+            epochs_override=args.epochs,
+            seed_override=args.baseline_seed,
+        )
+    else:
+        run_with_overrides(
+            args,
+            run_name=getattr(args, "run_name", "single"),
+            epochs_override=args.epochs,
+            seed_override=args.seed,
+        )

@@ -114,6 +114,16 @@ class Coach:
             dev_f1s.append(dev_f1)
             test_f1s.append(test_f1)
             train_losses.append(train_loss)
+        log.info(
+            "[Run summary] [name {}] [seed {}] [epochs {}] [best_epoch {}] [best_dev_f1 {:.4f}] [best_test_f1 {:.4f}]".format(
+                getattr(self.args, "run_name", "single"),
+                self.args.seed,
+                self.args.epochs,
+                best_epoch if best_epoch is not None else -1,
+                best_dev_f1 if best_dev_f1 is not None else -1.0,
+                best_test_f1 if best_test_f1 is not None else -1.0,
+            )
+        )
         if self.args.tuning:
             self.args.experiment.log_metric("best_dev_f1", best_dev_f1, epoch=epoch)
             self.args.experiment.log_metric("best_test_f1", best_test_f1, epoch=epoch)
