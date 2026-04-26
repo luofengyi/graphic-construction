@@ -21,11 +21,11 @@ def batch_graphify(features, lengths, speaker_tensor, wp, wf, edge_type_to_idx, 
         cur_len = lengths[j].item()
         node_features.append(features[j, :cur_len, :])
         perms = edge_perms(cur_len, wp, wf)
-        perms_rec = [(item[0] + length_sum, item[1] + length_sum) for item in perms]
+        perms_rec = [(int(item[0]) + length_sum, int(item[1]) + length_sum) for item in perms]
         length_sum += cur_len
         edge_index_lengths.append(len(perms))
         for item, item_rec in zip(perms, perms_rec):
-            edge_index.append(torch.tensor([item_rec[0], item_rec[1]]))
+            edge_index.append(torch.tensor([int(item_rec[0]), int(item_rec[1])], dtype=torch.long))
 
             speaker1 = speaker_tensor[j, item[0]].item()
             speaker2 = speaker_tensor[j, item[1]].item()
@@ -33,11 +33,11 @@ def batch_graphify(features, lengths, speaker_tensor, wp, wf, edge_type_to_idx, 
                 c = "0"
             else:
                 c = "1"
-            edge_type.append(edge_type_to_idx[str(speaker1) + str(speaker2) + c])
+            edge_type.append(int(edge_type_to_idx[str(speaker1) + str(speaker2) + c]))
 
     node_features = torch.cat(node_features, dim=0).to(device)  # [E, D_g]
     edge_index = torch.stack(edge_index).t().contiguous().to(device)  # [2, E]
-    edge_type = torch.tensor(edge_type).long().to(device)  # [E]
+    edge_type = torch.tensor(edge_type, dtype=torch.long).to(device)  # [E]
     edge_index_lengths = torch.tensor(edge_index_lengths).long().to(device)  # [B]
 
     return node_features, edge_index, edge_type, edge_index_lengths
@@ -66,7 +66,7 @@ def edge_perms(length, window_past, window_future):
             ]
 
         for item in eff_array:
-            perms.add((j, item))
+            perms.add((int(j), int(item)))
         all_perms = all_perms.union(perms)
     return list(all_perms)
 
