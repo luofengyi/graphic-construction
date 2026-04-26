@@ -17,4 +17,4 @@ python train.py \
   --from_begin \
   --epochs 50 \
   --batch_size 32 \
-  --device cpu
+  --device cuda:0
