@@ -107,7 +107,9 @@ def main(args):
     log.info("Start training...")
     best_dev_f1, best_epoch, _, _, _, _ = coach.train()
     return {
+        "best_dev_acc": coach.best_dev_acc,
         "best_dev_f1": best_dev_f1,
+        "best_test_acc": coach.best_test_acc,
         "best_epoch": best_epoch,
         "best_test_f1": coach.best_test_f1,
         "artifact_dir": coach.best_artifact_dir,
@@ -133,11 +135,13 @@ def run_with_overrides(args, run_name, epochs_override=None, seed_override=None)
     )
     result = main(run_args)
     log.info(
-        "[Run done] [name {}] [seed {}] [best_epoch {}] [best_dev_f1 {:.4f}] [best_test_f1 {:.4f}]".format(
+        "[Run done] [name {}] [seed {}] [best_epoch {}] [best_dev_acc {:.4f}] [best_dev_f1 {:.4f}] [best_test_acc {:.4f}] [best_test_f1 {:.4f}]".format(
             run_args.run_name,
             run_args.seed,
             result["best_epoch"],
+            result["best_dev_acc"] if result["best_dev_acc"] is not None else -1.0,
             result["best_dev_f1"],
+            result["best_test_acc"] if result["best_test_acc"] is not None else -1.0,
             result["best_test_f1"] if result["best_test_f1"] is not None else -1.0,
         )
     )
@@ -453,7 +457,9 @@ if __name__ == "__main__":
                     "run_name": run_name,
                     "seed": seed,
                     "best_epoch": result["best_epoch"],
+                    "best_dev_acc": result["best_dev_acc"],
                     "best_dev_f1": result["best_dev_f1"],
+                    "best_test_acc": result["best_test_acc"],
                     "best_test_f1": result["best_test_f1"],
                     "artifact_dir": result["artifact_dir"],
                 }

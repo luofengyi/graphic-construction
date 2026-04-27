@@ -46,7 +46,9 @@ def export_csv(rows, export_path):
         "seed",
         "epochs",
         "best_epoch",
+        "best_dev_acc",
         "best_dev_f1",
+        "best_test_acc",
         "best_test_f1",
         "run_dir",
     ]
@@ -64,17 +66,20 @@ def export_markdown(rows, aggregate, export_path):
     lines.append("## Aggregate")
     lines.append("")
     lines.append(f"- Seeds: {aggregate['seeds_text']}")
+    lines.append(f"- best_dev_acc: {aggregate['best_dev_acc_text']}")
     lines.append(f"- best_dev_f1: {aggregate['best_dev_text']}")
+    lines.append(f"- best_test_acc: {aggregate['best_test_acc_text']}")
     lines.append(f"- best_test_f1: {aggregate['best_test_text']}")
     lines.append("")
     lines.append("## Per-run")
     lines.append("")
-    lines.append("| run_name | seed | best_epoch | best_dev_f1 | best_test_f1 |")
-    lines.append("|---|---:|---:|---:|---:|")
+    lines.append("| run_name | seed | best_epoch | best_dev_acc | best_dev_f1 | best_test_acc | best_test_f1 |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|")
     for row in rows:
         lines.append(
             f"| {row.get('run_name','')} | {row.get('seed','')} | {row.get('best_epoch','')} | "
-            f"{float(row.get('best_dev_f1', 0.0)):.4f} | {float(row.get('best_test_f1', 0.0)):.4f} |"
+            f"{float(row.get('best_dev_acc', 0.0)):.4f} | {float(row.get('best_dev_f1', 0.0)):.4f} | "
+            f"{float(row.get('best_test_acc', 0.0)):.4f} | {float(row.get('best_test_f1', 0.0)):.4f} |"
         )
     with open(export_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
@@ -121,12 +126,16 @@ def main():
         )
 
     rows = sorted(rows, key=lambda x: int(x.get("seed", 0)))
+    dev_acc_values = [float(r["best_dev_acc"]) for r in rows if r.get("best_dev_acc") is not None]
     dev_values = [float(r["best_dev_f1"]) for r in rows if r.get("best_dev_f1") is not None]
+    test_acc_values = [float(r["best_test_acc"]) for r in rows if r.get("best_test_acc") is not None]
     test_values = [float(r["best_test_f1"]) for r in rows if r.get("best_test_f1") is not None]
 
     aggregate = {
         "seeds_text": ",".join(str(r.get("seed")) for r in rows),
+        "best_dev_acc_text": mean_std_text(dev_acc_values),
         "best_dev_text": mean_std_text(dev_values),
+        "best_test_acc_text": mean_std_text(test_acc_values),
         "best_test_text": mean_std_text(test_values),
     }
 
@@ -137,7 +146,9 @@ def main():
 
     print("[Summary]")
     print(f"Seeds: {aggregate['seeds_text']}")
+    print(f"best_dev_acc: {aggregate['best_dev_acc_text']}")
     print(f"best_dev_f1: {aggregate['best_dev_text']}")
+    print(f"best_test_acc: {aggregate['best_test_acc_text']}")
     print(f"best_test_f1: {aggregate['best_test_text']}")
     print(f"CSV: {csv_path}")
     print(f"Markdown: {md_path}")

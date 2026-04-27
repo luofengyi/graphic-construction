@@ -58,6 +58,8 @@ class Coach:
         self.best_epoch = None
         self.best_state = None
         self.best_test_f1 = None
+        self.best_dev_acc = None
+        self.best_test_acc = None
         self.best_artifact_dir = None
 
     def load_ckpt(self, ckpt):
@@ -76,20 +78,24 @@ class Coach:
         test_f1s = []
         train_losses = []
         best_test_f1 = None
+        best_dev_acc = None
+        best_test_acc = None
 
         # Train
         for epoch in range(1, self.args.epochs + 1):
             train_loss = self.train_epoch(epoch)
-            dev_f1, dev_loss = self.evaluate()
+            dev_f1, dev_acc, dev_loss = self.evaluate()
             self.scheduler.step(dev_loss)
-            test_f1, _ = self.evaluate(test=True)
+            test_f1, test_acc, _ = self.evaluate(test=True)
             if self.args.dataset == "mosei" and self.args.emotion == "multilabel":
                 test_f1 = np.array(list(test_f1.values())).mean()
-            log.info("[Dev set] [f1 {:.4f}]".format(dev_f1))
+            log.info("[Dev set] [acc {:.4f}] [f1 {:.4f}]".format(dev_acc, dev_f1))
 
             if best_dev_f1 is None or dev_f1 > best_dev_f1:
                 best_dev_f1 = dev_f1
                 best_test_f1 = test_f1
+                best_dev_acc = dev_acc
+                best_test_acc = test_acc
                 best_epoch = epoch
                 best_state = copy.deepcopy(self.model.state_dict())
                 if self.args.dataset == "mosei":
@@ -114,28 +120,41 @@ class Coach:
                         + ".pt")
 
                 log.info("Save the best model.")
-            log.info("[Test set] [f1 {:.4f}]".format(test_f1))
+            log.info("[Test set] [acc {:.4f}] [f1 {:.4f}]".format(test_acc, test_f1))
             dev_f1s.append(dev_f1)
             test_f1s.append(test_f1)
             train_losses.append(train_loss)
 
-        artifact_dir = self._save_best_run_artifacts(best_state, best_epoch, best_dev_f1, best_test_f1)
+        artifact_dir = self._save_best_run_artifacts(
+            best_state,
+            best_epoch,
+            best_dev_f1,
+            best_test_f1,
+            best_dev_acc,
+            best_test_acc,
+        )
         self.best_test_f1 = best_test_f1
+        self.best_dev_acc = best_dev_acc
+        self.best_test_acc = best_test_acc
         self.best_artifact_dir = artifact_dir
         log.info(
-            "[Run summary] [name {}] [seed {}] [epochs {}] [best_epoch {}] [best_dev_f1 {:.4f}] [best_test_f1 {:.4f}]".format(
+            "[Run summary] [name {}] [seed {}] [epochs {}] [best_epoch {}] [best_dev_acc {:.4f}] [best_dev_f1 {:.4f}] [best_test_acc {:.4f}] [best_test_f1 {:.4f}]".format(
                 getattr(self.args, "run_name", "single"),
                 self.args.seed,
                 self.args.epochs,
                 best_epoch if best_epoch is not None else -1,
+                best_dev_acc if best_dev_acc is not None else -1.0,
                 best_dev_f1 if best_dev_f1 is not None else -1.0,
+                best_test_acc if best_test_acc is not None else -1.0,
                 best_test_f1 if best_test_f1 is not None else -1.0,
             )
         )
         if artifact_dir is not None:
             log.info("[Run artifacts] [dir {}]".format(artifact_dir))
         if self.args.tuning:
+            self.args.experiment.log_metric("best_dev_acc", best_dev_acc, epoch=epoch)
             self.args.experiment.log_metric("best_dev_f1", best_dev_f1, epoch=epoch)
+            self.args.experiment.log_metric("best_test_acc", best_test_acc, epoch=epoch)
             self.args.experiment.log_metric("best_test_f1", best_test_f1, epoch=epoch)
 
             return best_dev_f1, best_epoch, best_state, train_losses, dev_f1s, test_f1s
@@ -202,6 +221,7 @@ class Coach:
                 golds = torch.cat(golds, dim=-1).numpy()
                 preds = torch.cat(preds, dim=-1).numpy()
                 f1 = metrics.f1_score(golds, preds, average="weighted")
+                acc = metrics.accuracy_score(golds, preds)
 
             if test:
                 print(
@@ -236,7 +256,7 @@ class Coach:
                         "disgust": disgust,
                         "fear": fear,
                     }
-        return f1, dev_loss
+        return f1, acc, dev_loss
 
     def _build_artifact_dir(self):
         output_root = getattr(self.args, "output_dir", "./run_outputs")
@@ -248,7 +268,15 @@ class Coach:
         os.makedirs(artifact_dir, exist_ok=True)
         return artifact_dir
 
-    def _save_best_run_artifacts(self, best_state, best_epoch, best_dev_f1, best_test_f1):
+    def _save_best_run_artifacts(
+        self,
+        best_state,
+        best_epoch,
+        best_dev_f1,
+        best_test_f1,
+        best_dev_acc,
+        best_test_acc,
+    ):
         if best_state is None:
             return None
 
@@ -256,8 +284,8 @@ class Coach:
         current_state = copy.deepcopy(self.model.state_dict())
         self.model.load_state_dict(best_state)
 
-        _, _, dev_golds, dev_preds, dev_report, dev_cm = self._evaluate_with_details(self.devset)
-        _, _, test_golds, test_preds, test_report, test_cm = self._evaluate_with_details(self.testset)
+        _, dev_acc, _, dev_golds, dev_preds, dev_report, dev_cm = self._evaluate_with_details(self.devset)
+        _, test_acc, _, test_golds, test_preds, test_report, test_cm = self._evaluate_with_details(self.testset)
 
         self.model.load_state_dict(current_state)
 
@@ -268,7 +296,9 @@ class Coach:
             "seed": self.args.seed,
             "epochs": self.args.epochs,
             "best_epoch": best_epoch,
+            "best_dev_acc": float(best_dev_acc) if best_dev_acc is not None else float(dev_acc),
             "best_dev_f1": float(best_dev_f1) if best_dev_f1 is not None else None,
+            "best_test_acc": float(best_test_acc) if best_test_acc is not None else float(test_acc),
             "best_test_f1": float(best_test_f1) if best_test_f1 is not None else None,
         }
         with open(os.path.join(artifact_dir, "best_metrics.json"), "w", encoding="utf-8") as f:
@@ -317,14 +347,16 @@ class Coach:
             golds = torch.cat(golds, dim=0).numpy()
             preds = torch.cat(preds, dim=0).numpy()
             f1 = metrics.f1_score(golds, preds, average="weighted")
+            acc = metrics.accuracy_score(golds, preds)
             report = metrics.classification_report(golds, preds, digits=4)
             cm = metrics.multilabel_confusion_matrix(golds, preds)
         else:
             golds = torch.cat(golds, dim=-1).numpy()
             preds = torch.cat(preds, dim=-1).numpy()
             f1 = metrics.f1_score(golds, preds, average="weighted")
+            acc = metrics.accuracy_score(golds, preds)
             report = metrics.classification_report(
                 golds, preds, target_names=self.label_to_idx.keys(), digits=4
             )
             cm = metrics.confusion_matrix(golds, preds)
-        return f1, dev_loss, golds, preds, report, cm
+        return f1, acc, dev_loss, golds, preds, report, cm
