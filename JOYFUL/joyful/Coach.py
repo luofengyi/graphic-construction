@@ -1,5 +1,7 @@
 import copy
 import time
+import os
+import json
 
 import numpy as np
 from numpy.core import overrides
@@ -55,6 +57,8 @@ class Coach:
         self.best_dev_f1 = None
         self.best_epoch = None
         self.best_state = None
+        self.best_test_f1 = None
+        self.best_artifact_dir = None
 
     def load_ckpt(self, ckpt):
         print('')
@@ -114,6 +118,10 @@ class Coach:
             dev_f1s.append(dev_f1)
             test_f1s.append(test_f1)
             train_losses.append(train_loss)
+
+        artifact_dir = self._save_best_run_artifacts(best_state, best_epoch, best_dev_f1, best_test_f1)
+        self.best_test_f1 = best_test_f1
+        self.best_artifact_dir = artifact_dir
         log.info(
             "[Run summary] [name {}] [seed {}] [epochs {}] [best_epoch {}] [best_dev_f1 {:.4f}] [best_test_f1 {:.4f}]".format(
                 getattr(self.args, "run_name", "single"),
@@ -124,6 +132,8 @@ class Coach:
                 best_test_f1 if best_test_f1 is not None else -1.0,
             )
         )
+        if artifact_dir is not None:
+            log.info("[Run artifacts] [dir {}]".format(artifact_dir))
         if self.args.tuning:
             self.args.experiment.log_metric("best_dev_f1", best_dev_f1, epoch=epoch)
             self.args.experiment.log_metric("best_test_f1", best_test_f1, epoch=epoch)
@@ -227,3 +237,94 @@ class Coach:
                         "fear": fear,
                     }
         return f1, dev_loss
+
+    def _build_artifact_dir(self):
+        output_root = getattr(self.args, "output_dir", "./run_outputs")
+        run_name = getattr(self.args, "run_name", "single")
+        run_folder = "{}_{}_seed{}".format(
+            run_name, self.args.dataset, self.args.seed
+        )
+        artifact_dir = os.path.join(output_root, run_folder)
+        os.makedirs(artifact_dir, exist_ok=True)
+        return artifact_dir
+
+    def _save_best_run_artifacts(self, best_state, best_epoch, best_dev_f1, best_test_f1):
+        if best_state is None:
+            return None
+
+        artifact_dir = self._build_artifact_dir()
+        current_state = copy.deepcopy(self.model.state_dict())
+        self.model.load_state_dict(best_state)
+
+        _, _, dev_golds, dev_preds, dev_report, dev_cm = self._evaluate_with_details(self.devset)
+        _, _, test_golds, test_preds, test_report, test_cm = self._evaluate_with_details(self.testset)
+
+        self.model.load_state_dict(current_state)
+
+        summary = {
+            "run_name": getattr(self.args, "run_name", "single"),
+            "dataset": self.args.dataset,
+            "modalities": self.args.modalities,
+            "seed": self.args.seed,
+            "epochs": self.args.epochs,
+            "best_epoch": best_epoch,
+            "best_dev_f1": float(best_dev_f1) if best_dev_f1 is not None else None,
+            "best_test_f1": float(best_test_f1) if best_test_f1 is not None else None,
+        }
+        with open(os.path.join(artifact_dir, "best_metrics.json"), "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+
+        with open(os.path.join(artifact_dir, "classification_report_dev.txt"), "w", encoding="utf-8") as f:
+            f.write(dev_report + "\n")
+        with open(os.path.join(artifact_dir, "classification_report_test.txt"), "w", encoding="utf-8") as f:
+            f.write(test_report + "\n")
+
+        if getattr(dev_cm, "ndim", 2) == 2:
+            np.savetxt(os.path.join(artifact_dir, "confusion_matrix_dev.csv"), dev_cm, fmt="%d", delimiter=",")
+        else:
+            np.save(os.path.join(artifact_dir, "confusion_matrix_dev.npy"), dev_cm)
+
+        if getattr(test_cm, "ndim", 2) == 2:
+            np.savetxt(os.path.join(artifact_dir, "confusion_matrix_test.csv"), test_cm, fmt="%d", delimiter=",")
+        else:
+            np.save(os.path.join(artifact_dir, "confusion_matrix_test.npy"), test_cm)
+
+        np.save(os.path.join(artifact_dir, "labels_dev.npy"), dev_golds)
+        np.save(os.path.join(artifact_dir, "preds_dev.npy"), dev_preds)
+        np.save(os.path.join(artifact_dir, "labels_test.npy"), test_golds)
+        np.save(os.path.join(artifact_dir, "preds_test.npy"), test_preds)
+        return artifact_dir
+
+    def _evaluate_with_details(self, dataset):
+        self.model.eval()
+        self.modelF.eval()
+        dev_loss = 0
+        with torch.no_grad():
+            golds = []
+            preds = []
+            for idx in tqdm(range(len(dataset)), desc="eval details"):
+                data = dataset[idx]
+                golds.append(data["label_tensor"])
+                for k, v in data.items():
+                    if not k == "utterance_texts":
+                        data[k] = v.to(self.args.device)
+                y_hat = self.model(data, False)
+                preds.append(y_hat.detach().to("cpu"))
+                nll = self.model.get_loss(data, False)
+                dev_loss += nll.item()
+
+        if self.args.dataset == "mosei" and self.args.emotion == "multilabel":
+            golds = torch.cat(golds, dim=0).numpy()
+            preds = torch.cat(preds, dim=0).numpy()
+            f1 = metrics.f1_score(golds, preds, average="weighted")
+            report = metrics.classification_report(golds, preds, digits=4)
+            cm = metrics.multilabel_confusion_matrix(golds, preds)
+        else:
+            golds = torch.cat(golds, dim=-1).numpy()
+            preds = torch.cat(preds, dim=-1).numpy()
+            f1 = metrics.f1_score(golds, preds, average="weighted")
+            report = metrics.classification_report(
+                golds, preds, target_names=self.label_to_idx.keys(), digits=4
+            )
+            cm = metrics.confusion_matrix(golds, preds)
+        return f1, dev_loss, golds, preds, report, cm

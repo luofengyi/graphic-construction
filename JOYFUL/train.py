@@ -3,6 +3,7 @@ import argparse
 import torch
 import os
 import copy
+import json
 import joyful
 import warnings
 import pickle
@@ -105,7 +106,12 @@ def main(args):
     # Train
     log.info("Start training...")
     best_dev_f1, best_epoch, _, _, _, _ = coach.train()
-    return {"best_dev_f1": best_dev_f1, "best_epoch": best_epoch}
+    return {
+        "best_dev_f1": best_dev_f1,
+        "best_epoch": best_epoch,
+        "best_test_f1": coach.best_test_f1,
+        "artifact_dir": coach.best_artifact_dir,
+    }
 
 
 def run_with_overrides(args, run_name, epochs_override=None, seed_override=None):
@@ -127,14 +133,23 @@ def run_with_overrides(args, run_name, epochs_override=None, seed_override=None)
     )
     result = main(run_args)
     log.info(
-        "[Run done] [name {}] [seed {}] [best_epoch {}] [best_dev_f1 {:.4f}]".format(
+        "[Run done] [name {}] [seed {}] [best_epoch {}] [best_dev_f1 {:.4f}] [best_test_f1 {:.4f}]".format(
             run_args.run_name,
             run_args.seed,
             result["best_epoch"],
             result["best_dev_f1"],
+            result["best_test_f1"] if result["best_test_f1"] is not None else -1.0,
         )
     )
+    if result.get("artifact_dir"):
+        log.info("[Run done] [artifacts {}]".format(result["artifact_dir"]))
     return result
+
+
+def parse_seed_list(seed_str):
+    if seed_str is None or str(seed_str).strip() == "":
+        return []
+    return [int(x.strip()) for x in str(seed_str).split(",") if x.strip()]
 
 
 if __name__ == "__main__":
@@ -353,6 +368,18 @@ if __name__ == "__main__":
         default=24,
         help="Seed used in baseline run when run_smoke_and_baseline is enabled.",
     )
+    parser.add_argument(
+        "--run_seeds",
+        type=str,
+        default="",
+        help="Comma separated seeds for one-click multi-run, e.g. 24,42,77.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="./run_outputs",
+        help="Directory used to store per-run best metrics and analysis artifacts.",
+    )
 
     args = parser.parse_args()
 
@@ -408,9 +435,32 @@ if __name__ == "__main__":
             seed_override=args.baseline_seed,
         )
     else:
-        run_with_overrides(
-            args,
-            run_name=getattr(args, "run_name", "single"),
-            epochs_override=args.epochs,
-            seed_override=args.seed,
-        )
+        seeds = parse_seed_list(args.run_seeds)
+        if not seeds:
+            seeds = [args.seed]
+
+        run_results = []
+        for seed in seeds:
+            run_name = "baseline_seed{}".format(seed) if len(seeds) > 1 else getattr(args, "run_name", "single")
+            result = run_with_overrides(
+                args,
+                run_name=run_name,
+                epochs_override=args.epochs,
+                seed_override=seed,
+            )
+            run_results.append(
+                {
+                    "run_name": run_name,
+                    "seed": seed,
+                    "best_epoch": result["best_epoch"],
+                    "best_dev_f1": result["best_dev_f1"],
+                    "best_test_f1": result["best_test_f1"],
+                    "artifact_dir": result["artifact_dir"],
+                }
+            )
+
+        os.makedirs(args.output_dir, exist_ok=True)
+        summary_file = os.path.join(args.output_dir, "multi_run_summary.json")
+        with open(summary_file, "w", encoding="utf-8") as f:
+            json.dump(run_results, f, indent=2, ensure_ascii=False)
+        log.info("[Multi-run summary] [path {}]".format(summary_file))
