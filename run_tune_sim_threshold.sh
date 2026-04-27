@@ -39,4 +39,10 @@ for THR in 0.6 0.65 0.7 0.75; do
     --md_name "summary_table.md"
 done
 
-echo "All threshold sweeps finished. Check ./run_outputs/sim_threshold_*/summary_table.*"
+python summarize_threshold_sweep.py \
+  --sweep_root "./run_outputs" \
+  --seeds "${SEEDS}" \
+  --csv_name "sim_threshold_comparison.csv" \
+  --md_name "sim_threshold_comparison.md"
+
+echo "All threshold sweeps finished. Check ./run_outputs/sim_threshold_comparison.* and ./run_outputs/sim_threshold_*/summary_table.*"
